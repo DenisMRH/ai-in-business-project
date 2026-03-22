@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: calorai-postgres
+    environment:
+      POSTGRES_USER: calorai
+      POSTGRES_PASSWORD: calorai
+      POSTGRES_DB: calorai
+    ports:
+      - "5432:5432"
+    volumes:
+      - calorai_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calorai -d calorai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  calorai_pg_data:
