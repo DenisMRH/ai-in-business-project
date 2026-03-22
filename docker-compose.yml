@@ -1,21 +1,64 @@
 services:
-  postgres:
+  db:
     image: pgvector/pgvector:pg15
-    container_name: calorai-postgres
     environment:
-      POSTGRES_USER: calorai
-      POSTGRES_PASSWORD: calorai
-      POSTGRES_DB: calorai
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-calorai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-calorai}
+      POSTGRES_DB: ${POSTGRES_DB:-calorai}
     volumes:
-      - calorai_pg_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U calorai -d calorai"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-calorai} -d ${POSTGRES_DB:-calorai}"]
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 10s
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    command:
+      - --model
+      - Qwen/Qwen2.5-72B-Instruct
+      - --tensor-parallel-size
+      - "3"
+      - --max-model-len
+      - "8192"
+    ports:
+      - "8000:8000"
+    shm_size: "16gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - "0"
+                - "1"
+                - "2"
+              capabilities: [gpu]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${API_PORT:-8001}:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8000/v1}
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids:
+                - "3"
+              capabilities: [gpu]
 
 volumes:
-  calorai_pg_data:
+  postgres_data:
