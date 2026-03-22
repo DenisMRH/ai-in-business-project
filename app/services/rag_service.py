@@ -56,7 +56,7 @@ def _portion_factor(weight_grams: int) -> float:
 async def calculate_meal(
     session: AsyncSession,
     extracted_data: MealExtraction,
-) -> dict[str, Any]:
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
     total_kcal = 0.0
     total_protein = 0.0
     total_fat = 0.0
@@ -89,10 +89,10 @@ async def calculate_meal(
             }
         )
 
-    return {
+    totals: dict[str, float] = {
         "total_kcal": total_kcal,
         "total_protein": total_protein,
         "total_fat": total_fat,
         "total_carb": total_carb,
-        "items": items_out,
     }
+    return totals, items_out

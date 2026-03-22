@@ -48,6 +48,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8000/v1}
+      WEBHOOK_PUBLIC_URL: ${WEBHOOK_PUBLIC_URL:-}
     depends_on:
       db:
         condition: service_healthy

@@ -60,16 +60,16 @@ class TestCalculateMealPortionMath(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(rag_service, "match_product", new_callable=AsyncMock) as mock_match:
             mock_match.return_value = fake_product
-            result = await rag_service.calculate_meal(session, extracted)
+            totals, items_out = await rag_service.calculate_meal(session, extracted)
 
         factor = 150 / 100.0
-        self.assertAlmostEqual(result["total_kcal"], 200.0 * factor)
-        self.assertAlmostEqual(result["total_protein"], 10.0 * factor)
-        self.assertAlmostEqual(result["total_fat"], 4.0 * factor)
-        self.assertAlmostEqual(result["total_carb"], 30.0 * factor)
+        self.assertAlmostEqual(totals["total_kcal"], 200.0 * factor)
+        self.assertAlmostEqual(totals["total_protein"], 10.0 * factor)
+        self.assertAlmostEqual(totals["total_fat"], 4.0 * factor)
+        self.assertAlmostEqual(totals["total_carb"], 30.0 * factor)
 
-        self.assertEqual(len(result["items"]), 1)
-        item = result["items"][0]
+        self.assertEqual(len(items_out), 1)
+        item = items_out[0]
         self.assertAlmostEqual(item["portion_kcal"], 300.0)
         self.assertAlmostEqual(item["portion_protein"], 15.0)
         self.assertAlmostEqual(item["portion_fat"], 6.0)
