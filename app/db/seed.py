@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import async_session_maker, engine
 from app.models.product import Product
 from app.services.embeddings import get_embedding
+from app.services.ml_globals import preload_models
 
 # Базовые продукты: КБЖУ на 100 г (приблизительные справочные значения)
 SEED_PRODUCTS: list[dict[str, Any]] = [
@@ -131,6 +132,7 @@ async def _upsert_product(
 
 
 async def seed_products() -> None:
+    await preload_models()
     async with async_session_maker() as session:
         for row in SEED_PRODUCTS:
             embedding = await get_embedding(row["name"])

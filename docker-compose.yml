@@ -21,12 +21,23 @@ services:
       - --model
       - Qwen/Qwen2.5-72B-Instruct
       - --tensor-parallel-size
-      - "3"
+      - "4"
+      - --gpu-memory-utilization
+      - "0.85"
       - --max-model-len
       - "8192"
+      - --trust-remote-code
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/v1/models >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 15m
     ports:
       - "8000:8000"
     shm_size: "16gb"
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -36,21 +47,24 @@ services:
                 - "0"
                 - "1"
                 - "2"
+                - "3"
               capabilities: [gpu]
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${API_PORT:-8001}:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8000/v1}
-      WEBHOOK_PUBLIC_URL: ${WEBHOOK_PUBLIC_URL:-}
+    command: python -m app.bot.run
+    volumes:
+      - huggingface_cache:/root/.cache/huggingface
     depends_on:
       db:
+        condition: service_healthy
+      vllm:
         condition: service_healthy
     deploy:
       resources:
@@ -63,3 +77,4 @@ services:
 
 volumes:
   postgres_data:
+  huggingface_cache:
