@@ -29,10 +29,10 @@ os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test-ml-mock")
 
 class TestPydanticMealExtraction(unittest.TestCase):
     def test_model_validate_json(self) -> None:
-        from app.services.llm_engine import MealExtraction
+        from app.services.llm_engine import MealExtractionResponse
 
         raw = '{"items": [{"name": "овсянка", "weight_grams": 200}, {"name": "молоко", "weight_grams": 150}]}'
-        m = MealExtraction.model_validate_json(raw)
+        m = MealExtractionResponse.model_validate_json(raw)
         self.assertEqual(len(m.items), 2)
         self.assertEqual(m.items[0].name, "овсянка")
         self.assertEqual(m.items[0].weight_grams, 200)
@@ -43,10 +43,8 @@ class TestAsyncMLOverlays(unittest.IsolatedAsyncioTestCase):
         from app.services import ml_globals
         from app.services import stt_engine
 
-        seg = MagicMock()
-        seg.text = " привет "
         mock_model = MagicMock()
-        mock_model.transcribe.return_value = (iter([seg]), None)
+        mock_model.return_value = {"text": " привет "}
 
         ml_globals._whisper_model = mock_model  # noqa: SLF001
 
@@ -56,7 +54,13 @@ class TestAsyncMLOverlays(unittest.IsolatedAsyncioTestCase):
             ml_globals._whisper_model = None  # noqa: SLF001
 
         self.assertEqual(text, "привет")
-        mock_model.transcribe.assert_called_once_with("/tmp/fake.wav")
+        mock_model.assert_called_once()
+        call_args = mock_model.call_args
+        self.assertEqual(call_args[0][0], "/tmp/fake.wav")
+        self.assertEqual(
+            call_args[1].get("generate_kwargs"),
+            {"language": "russian"},
+        )
 
     async def test_get_embedding_query_prefix_and_to_thread(self) -> None:
         from app.services import embeddings
@@ -80,7 +84,7 @@ class TestAsyncMLOverlays(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_extract_food_mock_openai(self) -> None:
-        from app.services.llm_engine import MealExtraction, extract_food
+        from app.services.llm_engine import ExtractedMealItem, extract_food
 
         payload = '{"items": [{"name": "банан", "weight_grams": 120}]}'
         mock_completion = MagicMock()
@@ -98,10 +102,11 @@ class TestAsyncMLOverlays(unittest.IsolatedAsyncioTestCase):
 
             result = await extract_food("съел банан")
 
-        self.assertIsInstance(result, MealExtraction)
-        self.assertEqual(len(result.items), 1)
-        self.assertEqual(result.items[0].name, "банан")
-        self.assertEqual(result.items[0].weight_grams, 120)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], ExtractedMealItem)
+        self.assertEqual(result[0].name, "банан")
+        self.assertEqual(result[0].weight_grams, 120)
         mock_create.assert_awaited_once()
         kwargs = mock_create.await_args.kwargs
         self.assertEqual(kwargs.get("response_format"), {"type": "json_object"})

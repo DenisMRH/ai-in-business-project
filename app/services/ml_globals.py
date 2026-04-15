@@ -1,26 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import torch
+from transformers import pipeline
 
 if TYPE_CHECKING:
-    from faster_whisper import WhisperModel
     from sentence_transformers import SentenceTransformer
 
-_whisper_model: WhisperModel | None = None
+# HF automatic-speech-recognition Pipeline (Whisper via PyTorch on GPU)
+_whisper_model: Any = None
 _embedding_model: SentenceTransformer | None = None
 
 
-def _load_whisper_model_sync() -> WhisperModel:
+def _load_whisper_model_sync() -> Any:
     global _whisper_model
     if _whisper_model is None:
-        from faster_whisper import WhisperModel
-
-        _whisper_model = WhisperModel(
-            "large-v3",
-            device="cuda",
-            device_index=0,
-            compute_type="float16",
+        _whisper_model = pipeline(
+            "automatic-speech-recognition",
+            model="openai/whisper-large-v3",
+            device="cuda:0",  # Maps to physical GPU 3 in docker
+            torch_dtype=torch.float16,
+            model_kwargs={"attn_implementation": "sdpa"},
         )
     return _whisper_model
 
@@ -55,9 +57,9 @@ async def preload_models() -> None:
         await asyncio.to_thread(_load_embedding_model_sync)
 
 
-def get_whisper_model() -> WhisperModel:
+def get_whisper_model() -> Any:
     if _whisper_model is None:
-        raise RuntimeError("Whisper model is not loaded. Call preload_models() first.")
+        raise RuntimeError("Whisper pipeline is not loaded. Call preload_models() first.")
     return _whisper_model
 
 

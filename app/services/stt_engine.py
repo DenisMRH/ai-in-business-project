@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 async def transcribe_audio(file_path: str) -> str:
     def _transcribe_sync() -> str:
         model = ml_globals.get_whisper_model()
-        segments, _info = model.transcribe(file_path)
-        parts: list[str] = []
-        for seg in segments:
-            parts.append(seg.text)
-        return "".join(parts).strip()
+        # HF pipeline accepts file path (uses ffmpeg under the hood)
+        result = model(
+            file_path,
+            generate_kwargs={"language": "russian"},
+        )
+        return result["text"].strip()
 
     try:
         return await asyncio.to_thread(_transcribe_sync)

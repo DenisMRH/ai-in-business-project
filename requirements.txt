@@ -7,5 +7,6 @@ alembic
 pgvector
 aiogram
 openai
-faster-whisper
+transformers
+torchaudio
 sentence-transformers

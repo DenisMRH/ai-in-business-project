@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
@@ -35,6 +36,33 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
 
 def _escape_md(text: str) -> str:
     return re.sub(r"([_*\[\]()~`>#+\-=|{}.!\\])", r"\\\1", text)
+
+
+# Plain status text; MarkdownV2 escaping is applied in update_status / initial answer
+STATUS_RECOGNIZING = "🎤 Распознаю речь..."
+STATUS_ANALYZING = "🤖 Анализирую состав..."
+STATUS_SAVING = "💾 Сохраняю..."
+
+
+async def update_status(message: Message, text: str) -> None:
+    """
+    Best-effort status edit. Never raises: failures must not stop STT/LLM/DB.
+    """
+    escaped = (
+        text.replace(".", "\\.")
+        .replace("-", "\\-")
+        .replace("(", "\\(")
+        .replace(")", "\\)")
+    )
+    try:
+        await message.edit_text(escaped, parse_mode="MarkdownV2")
+    except TelegramBadRequest as exc:
+        err = str(exc).lower()
+        if "message is not modified" in err or "message can't be edited" in err:
+            return
+        logger.warning("update_status TelegramBadRequest: %s", exc)
+    except Exception as exc:
+        logger.warning("update_status failed: %s", exc)
 
 
 def _format_meal_report(
@@ -107,7 +135,8 @@ async def _get_stats(user_id: int, days: int) -> tuple[float, float, float, floa
 async def handle_start(message: Message) -> None:
     await message.answer(
         "*Добро пожаловать в CalorAI\\!* "
-        "Отправьте голосовое сообщение с приемом пищи.",
+        "Отправьте голосовое сообщение с приемом пищи\\.",
+        parse_mode="MarkdownV2",
         reply_markup=MAIN_MENU_KEYBOARD,
     )
 
@@ -119,6 +148,7 @@ async def handle_help(message: Message) -> None:
         "1\\. Отправьте голосом что вы съели\n"
         "2\\. Бот распознает речь и посчитает КБЖУ\n"
         "3\\. Используйте кнопки статистики внизу",
+        parse_mode="MarkdownV2",
         reply_markup=MAIN_MENU_KEYBOARD,
     )
 
@@ -131,11 +161,15 @@ async def handle_stats_day(message: Message) -> None:
         kcal, protein, fat, carb = await _get_stats(message.from_user.id, days=1)
         await message.answer(
             _format_stats_card("Статистика за день", kcal, protein, fat, carb),
+            parse_mode="MarkdownV2",
             reply_markup=MAIN_MENU_KEYBOARD,
         )
     except Exception:
         logger.exception("Failed to build day stats for user_id=%s", message.from_user.id)
-        await message.answer("Не удалось получить статистику\\. Попробуйте позже\\.")
+        await message.answer(
+            "Не удалось получить статистику\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2",
+        )
 
 
 @router.message(F.text == "📅 За неделю")
@@ -146,11 +180,15 @@ async def handle_stats_week(message: Message) -> None:
         kcal, protein, fat, carb = await _get_stats(message.from_user.id, days=7)
         await message.answer(
             _format_stats_card("Статистика за неделю", kcal, protein, fat, carb),
+            parse_mode="MarkdownV2",
             reply_markup=MAIN_MENU_KEYBOARD,
         )
     except Exception:
         logger.exception("Failed to build week stats for user_id=%s", message.from_user.id)
-        await message.answer("Не удалось получить статистику\\. Попробуйте позже\\.")
+        await message.answer(
+            "Не удалось получить статистику\\. Попробуйте позже\\.",
+            parse_mode="MarkdownV2",
+        )
 
 
 @router.message(F.voice)
@@ -159,7 +197,11 @@ async def handle_voice(message: Message) -> None:
         return
 
     status_message = await message.answer(
-        "🎤 Распознаю речь\\.\\.\\.",
+        STATUS_RECOGNIZING.replace(".", "\\.")
+        .replace("-", "\\-")
+        .replace("(", "\\(")
+        .replace(")", "\\)"),
+        parse_mode="MarkdownV2",
         reply_markup=MAIN_MENU_KEYBOARD,
     )
 
@@ -169,8 +211,10 @@ async def handle_voice(message: Message) -> None:
         await message.bot.download(message.voice, destination=ogg_path)
 
         text = await transcribe_audio(ogg_path)
-        await status_message.edit_text("🤖 Анализирую состав\\.\\.\\.")
+        await update_status(status_message, STATUS_ANALYZING)
+
         meal_items = await extract_food(text)
+        await update_status(status_message, STATUS_SAVING)
 
         async with async_session_maker() as session:
             user = await get_or_create_user(session, message.from_user.id)
@@ -200,19 +244,27 @@ async def handle_voice(message: Message) -> None:
 
             await session.commit()
 
-        await status_message.edit_text("✅ Готово\\!")
         report = _format_meal_report(text, totals, items_rows)
-        await message.answer(report, reply_markup=MAIN_MENU_KEYBOARD)
+        await message.answer(
+            report,
+            parse_mode="MarkdownV2",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
     except QwenUnavailableError as exc:
         logger.exception(
             "Qwen unavailable while processing voice. user_id=%s",
             message.from_user.id,
         )
-        await status_message.edit_text(_escape_md(str(exc)))
+        await message.answer(
+            _escape_md(str(exc)),
+            parse_mode="MarkdownV2",
+            reply_markup=MAIN_MENU_KEYBOARD,
+        )
     except Exception:
         logging.exception("CRITICAL ERROR DURING VOICE PROCESSING:")
         await message.answer(
             "Произошла ошибка при обработке сообщения\\. Подробности в логах\\.",
+            parse_mode="MarkdownV2",
             reply_markup=MAIN_MENU_KEYBOARD,
         )
     finally:

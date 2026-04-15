@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import Product
 from app.services.embeddings import get_embedding
+from app.services.llm_engine import NutritionPer100g
 
 if TYPE_CHECKING:
     from app.services.llm_engine import ExtractedMealItem
@@ -17,9 +18,63 @@ COSINE_DISTANCE_MATCH_THRESHOLD = 0.25
 logger = logging.getLogger(__name__)
 
 
+async def _get_product_by_exact_name(
+    session: AsyncSession, name: str
+) -> Product | None:
+    stmt = select(Product).where(Product.name == name)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _persist_llm_product(
+    session: AsyncSession,
+    name: str,
+    vec: list[float],
+    nutrition: NutritionPer100g,
+) -> Product:
+    """
+    Сохраняет продукт с КБЖУ от LLM: новая строка или обновление при том же name (unique).
+    """
+    existing = await _get_product_by_exact_name(session, name)
+    if existing is not None:
+        existing.embedding = vec
+        existing.kcal_per_100g = nutrition.kcal
+        existing.protein_per_100g = nutrition.protein
+        existing.fat_per_100g = nutrition.fat
+        existing.carb_per_100g = nutrition.carb
+        await session.flush()
+        logger.info("RAG: обновлён продукт по имени после оценки LLM: %s", name)
+        return existing
+
+    new_product = Product(
+        name=name,
+        embedding=vec,
+        kcal_per_100g=nutrition.kcal,
+        protein_per_100g=nutrition.protein,
+        fat_per_100g=nutrition.fat,
+        carb_per_100g=nutrition.carb,
+    )
+    session.add(new_product)
+    await session.flush()
+    logger.info("RAG: в БД добавлен новый продукт (оценка LLM): %s", name)
+    return new_product
+
+
 async def match_product(session: AsyncSession, product_name: str) -> Product:
+    """
+    Находит продукт по RAG или создаёт запись: для неизвестного блюда вызывается LLM (КБЖУ на 100 г),
+    результат пишется в ``products`` с эмбеддингом для следующих запросов.
+    """
     try:
-        vec = await get_embedding(product_name)
+        cleaned = product_name.strip()
+        if not cleaned:
+            raise ValueError("Пустое название продукта.")
+
+        exact = await _get_product_by_exact_name(session, cleaned)
+        if exact is not None:
+            return exact
+
+        vec = await get_embedding(cleaned)
         dist_expr = Product.embedding.cosine_distance(vec)
 
         stmt = (
@@ -35,20 +90,11 @@ async def match_product(session: AsyncSession, product_name: str) -> Product:
             if distance is not None and float(distance) <= COSINE_DISTANCE_MATCH_THRESHOLD:
                 return product
 
+        # Нет уверенного совпадения — неизвестное или новое блюдо: LLM оценивает КБЖУ → БД для RAG
         from app.services.llm_engine import estimate_nutrition_per_100g
 
-        nutrition = await estimate_nutrition_per_100g(product_name)
-        new_product = Product(
-            name=product_name,
-            embedding=vec,
-            kcal_per_100g=nutrition.kcal,
-            protein_per_100g=nutrition.protein,
-            fat_per_100g=nutrition.fat,
-            carb_per_100g=nutrition.carb,
-        )
-        session.add(new_product)
-        await session.flush()
-        return new_product
+        nutrition = await estimate_nutrition_per_100g(cleaned)
+        return await _persist_llm_product(session, cleaned, vec, nutrition)
     except Exception:
         logger.exception("RAG product matching failed for product_name=%s", product_name)
         raise
